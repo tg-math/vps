@@ -368,13 +368,13 @@ setup_vm_image() {
         fi
     fi
 
-    # Исправленная cloud-init конфигурация для root доступа
+    # Fixed cloud-init configuration for root access
     cat > user-data <<EOF
 #cloud-config
 hostname: $HOSTNAME
 manage_etc_hosts: true
 
-# Разрешаем root SSH доступ
+# Allow root SSH access
 ssh_pwauth: true
 disable_root: false
 allow_public_ssh_keys: true
@@ -397,7 +397,7 @@ chpasswd:
     $USERNAME:$PASSWORD
   expire: false
 
-# Настройки SSH
+# SSH settings
 ssh_authorized_keys:
   - ""
   
