@@ -1,5 +1,5 @@
 #!/bin/bash
-sudo apt update -y && sudo apt upgrade -y && sudo apt install qemu-system cloud-image-utils wget lsof openssh-client -y
+sudo apt update -y && sudo apt upgrade -y && sudo apt install qemu-system cloud-image-utils wget lsof openssh-client socat -y
 set -euo pipefail
 
 # =============================
@@ -10,14 +10,14 @@ set -euo pipefail
 display_header() {
     clear
     cat << "EOF"
-"████████╗██╗███╗   ███╗ █████╗ "
-"╚══██╔══╝██║████╗ ████║██╔══██╗"
-"   ██║   ██║██╔████╔██║███████║"
-"   ██║   ██║██║╚██╔╝██║██╔══██║"
-"   ██║   ██║██║ ╚═╝ ██║██║  ██║"
-"   ╚═╝   ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝"
-"                                "
-"           Tima VM              "
+████████╗██╗███╗   ███╗ █████╗ 
+╚══██╔══╝██║████╗ ████║██╔══██╗
+   ██║   ██║██╔████╔██║███████║
+   ██║   ██║██║╚██╔╝██║██╔══██║
+   ██║   ██║██║ ╚═╝ ██║██║  ██║
+   ╚═╝   ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝
+                               
+           Tima VM              
 EOF
     echo
 }
@@ -50,47 +50,14 @@ check_image_lock() {
         local pid=$(lsof "$img_file" 2>/dev/null | grep qemu-system | awk '{print $2}' | head -1)
         if [[ -n "$pid" ]]; then
             print_status "INFO" "🔍 Process ID using the image: $pid"
-            
-            # Check if it's our own VM
-            if ps -p "$pid" -o cmd= | grep -q "$vm_name"; then
-                print_status "INFO" "🤔 This appears to be the same VM already running"
-                read -p "$(print_status "INPUT" "🔄 Kill existing process and restart? (y/N): ")" kill_choice
-                if [[ "$kill_choice" =~ ^[Yy]$ ]]; then
-                    kill "$pid"
-                    sleep 2
-                    if kill -0 "$pid" 2>/dev/null; then
-                        kill -9 "$pid"
-                        print_status "WARN" "⚠️  Forcefully terminated process $pid"
-                    fi
-                    return 0
-                else
-                    return 1
-                fi
-            else
-                print_status "ERROR" "🚫 Another QEMU instance is using this image"
-                return 1
-            fi
+            return 1
         fi
-        return 1
     fi
     
     # Check for lock files
     local lock_file="${img_file}.lock"
     if [[ -f "$lock_file" ]]; then
         print_status "WARN" "🔒 Lock file found: $lock_file"
-        
-        # Check if lock file is stale (older than 5 minutes)
-        if [[ $(find "$lock_file" -mmin +5 2>/dev/null) ]]; then
-            print_status "WARN" "⏰ Lock file appears stale (older than 5 minutes)"
-            read -p "$(print_status "INPUT" "🗑️  Remove stale lock file? (y/N): ")" remove_lock
-            if [[ "$remove_lock" =~ ^[Yy]$ ]]; then
-                rm -f "$lock_file"
-                print_status "SUCCESS" "✅ Removed stale lock file"
-                return 0
-            else
-                return 1
-            fi
-        fi
         return 1
     fi
     return 0
@@ -115,8 +82,8 @@ validate_input() {
             fi
             ;;
         "port")
-            if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -lt 23 ] || [ "$value" -gt 65535 ]; then
-                print_status "ERROR" "❌ Must be a valid port number (23-65535)"
+            if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -lt 22 ] || [ "$value" -gt 65535 ]; then
+                print_status "ERROR" "❌ Must be a valid port number (22-65535)"
                 return 1
             fi
             ;;
@@ -138,7 +105,7 @@ validate_input() {
 
 # Function to check dependencies
 check_dependencies() {
-    local deps=("qemu-system-x86_64" "wget" "cloud-localds" "qemu-img" "lsof" "ssh")
+    local deps=("qemu-system-x86_64" "wget" "cloud-localds" "qemu-img" "lsof" "ssh" "socat")
     local missing_deps=()
     
     for dep in "${deps[@]}"; do
@@ -149,7 +116,7 @@ check_dependencies() {
     
     if [ ${#missing_deps[@]} -ne 0 ]; then
         print_status "ERROR" "🔧 Missing dependencies: ${missing_deps[*]}"
-        print_status "INFO" "💡 On Ubuntu/Debian, try: sudo apt install qemu-system cloud-image-utils wget lsof openssh-client"
+        print_status "INFO" "💡 On Ubuntu/Debian, try: sudo apt install qemu-system cloud-image-utils wget lsof openssh-client socat"
         exit 1
     fi
 }
@@ -162,7 +129,9 @@ cleanup() {
 
 # Function to get all VM configurations
 get_vm_list() {
-    find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null | sort
+    if [ -d "$VM_DIR" ]; then
+        find "$VM_DIR" -name "*.conf" -exec basename {} .conf \; 2>/dev/null | sort
+    fi
 }
 
 # Function to get only running VMs
@@ -267,11 +236,8 @@ connect_to_vm_gui() {
                 print_status "INFO" "📌 Check your window manager for the QEMU window"
             else
                 print_status "INFO" "🖥️  VM $vm_name is running in console mode"
-                print_status "INFO" "📌 You can connect to it via the serial console if supported"
-                read -p "$(print_status "INPUT" "🔄 Do you want to reconnect to the console? (y/N): ")" console_choice
-                if [[ "$console_choice" =~ ^[Yy]$ ]]; then
-                    reconnect_to_console "$vm_name"
-                fi
+                print_status "INFO" "📌 You can connect to it via the serial console"
+                reconnect_to_console "$vm_name"
             fi
         else
             print_status "ERROR" "❌ VM '$vm_name' is not running"
@@ -289,14 +255,15 @@ reconnect_to_console() {
             print_status "INFO" "📟 Reconnecting to console of $vm_name..."
             print_status "INFO" "🛑 Press Ctrl+A then X to exit the console"
             
-            # Try to reconnect to the console via the monitor socket if available
+            # Try to reconnect to the console via the monitor socket
             local monitor_sock="/tmp/qemu-${vm_name}-monitor.sock"
             if [[ -S "$monitor_sock" ]]; then
-                echo "console" | socat - "$monitor_sock" 2>/dev/null || \
-                print_status "ERROR" "❌ Failed to reconnect to console"
+                echo "sendkey ctrl-alt-f1" | socat - "$monitor_sock" 2>/dev/null
+                print_status "INFO" "💡 The console is attached to the terminal where you started the VM"
+                print_status "INFO" "📋 To view the console, check the terminal where you ran 'Start VM'"
             else
                 print_status "ERROR" "❌ Cannot reconnect to detached console"
-                print_status "INFO" "💡 Console reconnection is only available when VM was started with monitor socket"
+                print_status "INFO" "💡 Console is attached to the original terminal"
             fi
         else
             print_status "ERROR" "❌ No console mode VM found for $vm_name"
@@ -409,12 +376,12 @@ create_new_vm() {
 
     while true; do
         read -p "$(print_status "INPUT" "🖥️  Enable GUI mode? (y/n, default: n): ")" gui_input
-        GUI_MODE=false
         gui_input="${gui_input:-n}"
         if [[ "$gui_input" =~ ^[Yy]$ ]]; then 
             GUI_MODE=true
             break
         elif [[ "$gui_input" =~ ^[Nn]$ ]]; then
+            GUI_MODE=false
             break
         else
             print_status "ERROR" "❌ Please answer y or n"
@@ -457,12 +424,12 @@ setup_vm_image() {
     # Resize the disk image if needed
     if ! qemu-img resize "$IMG_FILE" "$DISK_SIZE" 2>/dev/null; then
         print_status "WARN" "⚠️  Failed to resize disk image. Creating new image with specified size..."
-        # Create a new image with the specified size
-        rm -f "$IMG_FILE"
-        qemu-img create -f qcow2 -F qcow2 -b "$IMG_FILE" "$IMG_FILE.tmp" "$DISK_SIZE" 2>/dev/null || \
-        qemu-img create -f qcow2 "$IMG_FILE" "$DISK_SIZE"
-        if [ -f "$IMG_FILE.tmp" ]; then
-            mv "$IMG_FILE.tmp" "$IMG_FILE"
+        # Create a new backing image
+        local temp_img="$IMG_FILE.tmp.$$"
+        if qemu-img create -f qcow2 -b "$IMG_FILE" -F qcow2 "$temp_img" "$DISK_SIZE" 2>/dev/null; then
+            mv "$temp_img" "$IMG_FILE"
+        else
+            qemu-img create -f qcow2 "$IMG_FILE" "$DISK_SIZE"
         fi
     fi
 
@@ -476,7 +443,7 @@ users:
   - name: $USERNAME
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
-    password: $(openssl passwd -6 "$PASSWORD" | tr -d '\n')
+    password: $(echo "$PASSWORD" | mkpasswd -m sha-512 --stdin 2>/dev/null || echo "$PASSWORD" | openssl passwd -6 -stdin)
 chpasswd:
   list: |
     root:$PASSWORD
@@ -509,14 +476,14 @@ start_vm() {
             print_status "ERROR" "🔒 Cannot start VM: Image file is locked by another process"
             read -p "$(print_status "INPUT" "🔄 Do you want to force kill all QEMU processes using this image? (y/N): ")" force_kill
             if [[ "$force_kill" =~ ^[Yy]$ ]]; then
-                pkill -f "qemu-system.*$IMG_FILE"
+                pkill -f "qemu-system.*$IMG_FILE" || true
                 sleep 2
                 if pgrep -f "qemu-system.*$IMG_FILE" >/dev/null; then
-                    pkill -9 -f "qemu-system.*$IMG_FILE"
+                    pkill -9 -f "qemu-system.*$IMG_FILE" || true
                 fi
                 print_status "SUCCESS" "✅ Terminated processes using the image"
-                # Remove any lock files
                 rm -f "${IMG_FILE}.lock" 2>/dev/null
+                rm -f "/tmp/qemu-${vm_name}-monitor.sock" 2>/dev/null
             else
                 return 1
             fi
@@ -537,7 +504,6 @@ start_vm() {
         print_status "INFO" "🚀 Starting VM: $vm_name"
         print_status "INFO" "🔌 SSH: ssh -p $SSH_PORT $USERNAME@localhost"
         print_status "INFO" "🔑 Password: $PASSWORD"
-        print_status "INFO" "🐌 Running in pure software emulation mode (no KVM)"
         
         # Check if image file exists
         if [[ ! -f "$IMG_FILE" ]]; then
@@ -578,7 +544,7 @@ start_vm() {
 
         # Add GUI or console mode
         if [[ "$GUI_MODE" == true ]]; then
-            qemu_cmd+=(-vga virtio -display gtk,gl=on)
+            qemu_cmd+=(-vga virtio -display gtk)
             print_status "INFO" "🖥️  Starting in GUI mode..."
         else
             qemu_cmd+=(-nographic -serial mon:stdio)
@@ -597,12 +563,10 @@ start_vm() {
 
         print_status "INFO" "⚡ Starting QEMU in pure software emulation mode..."
         echo "📊 Configuration: ${MEMORY}MB RAM, ${CPUS} CPUs, ${DISK_SIZE} disk"
-        echo "ℹ️  Note: For better performance, consider enabling KVM if your system supports it"
         
         # Start the VM
         if ! "${qemu_cmd[@]}"; then
             print_status "ERROR" "❌ Failed to start VM. There might be a problem with the image file or configuration."
-            # Try to clean up lock files
             rm -f "${IMG_FILE}.lock" 2>/dev/null
             return 1
         fi
@@ -619,7 +583,7 @@ delete_vm() {
     read -p "$(print_status "INPUT" "🗑️  Are you sure? (y/N): ")" -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        if load_vm_config "$vm_name"; then
+        if load_vm_config "$vm_name" 2>/dev/null; then
             # Check if VM is running
             if is_vm_running "$vm_name"; then
                 print_status "WARN" "⚠️  VM is currently running. Stopping it first..."
@@ -627,9 +591,14 @@ delete_vm() {
                 sleep 2
             fi
             
-            rm -f "$IMG_FILE" "$SEED_FILE" "$VM_DIR/$vm_name.conf" "${IMG_FILE}.lock" 2>/dev/null
+            rm -f "$IMG_FILE" "$SEED_FILE" "$VM_DIR/$vm_name.conf" 2>/dev/null
+            rm -f "${IMG_FILE}.lock" 2>/dev/null
             rm -f "/tmp/qemu-${vm_name}-monitor.sock" 2>/dev/null
             print_status "SUCCESS" "✅ VM '$vm_name' has been deleted"
+        else
+            # If config is corrupted, just delete files
+            rm -f "$VM_DIR/$vm_name".* 2>/dev/null
+            print_status "SUCCESS" "✅ VM '$vm_name' files have been deleted"
         fi
     else
         print_status "INFO" "👍 Deletion cancelled"
@@ -658,13 +627,6 @@ show_vm_info() {
         echo "💿 Image File: $IMG_FILE"
         echo "🌱 Seed File: $SEED_FILE"
         
-        # Show lock status
-        if check_image_lock "$IMG_FILE" "$vm_name" >/dev/null 2>&1; then
-            echo "🔓 Image Status: Unlocked"
-        else
-            echo "🔒 Image Status: Locked (possibly in use)"
-        fi
-        
         # Show if VM is running
         if is_vm_running "$vm_name"; then
             echo "🚀 Status: Running"
@@ -683,12 +645,6 @@ show_vm_info() {
 is_vm_running() {
     local vm_name=$1
     
-    # First try to find by image file
-    if pgrep -f "qemu-system.*$vm_name" >/dev/null; then
-        return 0
-    fi
-    
-    # Also check by image file path
     if load_vm_config "$vm_name" 2>/dev/null; then
         if pgrep -f "qemu-system.*$IMG_FILE" >/dev/null; then
             return 0
@@ -702,7 +658,7 @@ is_vm_running() {
 stop_vm() {
     local vm_name=$1
     
-    if load_vm_config "$vm_name"; then
+    if load_vm_config "$vm_name" 2>/dev/null; then
         if is_vm_running "$vm_name"; then
             print_status "INFO" "🛑 Stopping VM: $vm_name"
             
@@ -710,17 +666,17 @@ stop_vm() {
             local monitor_sock="/tmp/qemu-${vm_name}-monitor.sock"
             if [[ -S "$monitor_sock" ]]; then
                 echo "system_powerdown" | socat - "$monitor_sock" 2>/dev/null
-                sleep 3
+                sleep 5
             fi
             
             # Try graceful shutdown via signal
-            pkill -f "qemu-system.*$IMG_FILE"
-            sleep 2
+            pkill -f "qemu-system.*$IMG_FILE" || true
+            sleep 3
             
             # Check if it stopped
             if is_vm_running "$vm_name"; then
                 print_status "WARN" "⚠️  VM did not stop gracefully, forcing termination..."
-                pkill -9 -f "qemu-system.*$IMG_FILE"
+                pkill -9 -f "qemu-system.*$IMG_FILE" || true
                 sleep 1
             fi
             
@@ -736,7 +692,6 @@ stop_vm() {
             fi
         else
             print_status "INFO" "💤 VM $vm_name is not running"
-            # Still try to clean up any lock files
             rm -f "${IMG_FILE}.lock" 2>/dev/null
             rm -f "/tmp/qemu-${vm_name}-monitor.sock" 2>/dev/null
         fi
@@ -789,8 +744,8 @@ edit_vm_config() {
                 3)
                     while true; do
                         read -s -p "$(print_status "INPUT" "🔑 Enter new password (current: ****): ")" new_password
-                        new_password="${new_password:-$PASSWORD}"
                         echo
+                        new_password="${new_password:-$PASSWORD}"
                         if [ -n "$new_password" ]; then
                             PASSWORD="$new_password"
                             break
@@ -817,7 +772,6 @@ edit_vm_config() {
                 5)
                     while true; do
                         read -p "$(print_status "INPUT" "🖥️  Enable GUI mode? (y/n, current: $GUI_MODE): ")" gui_input
-                        gui_input="${gui_input:-}"
                         if [[ "$gui_input" =~ ^[Yy]$ ]]; then 
                             GUI_MODE=true
                             break
@@ -825,7 +779,6 @@ edit_vm_config() {
                             GUI_MODE=false
                             break
                         elif [ -z "$gui_input" ]; then
-                            # Keep current value if user just pressed Enter
                             break
                         else
                             print_status "ERROR" "❌ Please answer y or n"
@@ -913,29 +866,6 @@ resize_vm_disk() {
                     return 0
                 fi
                 
-                # Check if new size is smaller than current (not recommended)
-                local current_size_num=${DISK_SIZE%[GgMm]}
-                local new_size_num=${new_disk_size%[GgMm]}
-                local current_unit=${DISK_SIZE: -1}
-                local new_unit=${new_disk_size: -1}
-                
-                # Convert both to MB for comparison
-                if [[ "$current_unit" =~ [Gg] ]]; then
-                    current_size_num=$((current_size_num * 1024))
-                fi
-                if [[ "$new_unit" =~ [Gg] ]]; then
-                    new_size_num=$((new_size_num * 1024))
-                fi
-                
-                if [[ $new_size_num -lt $current_size_num ]]; then
-                    print_status "WARN" "⚠️  Shrinking disk size is not recommended and may cause data loss!"
-                    read -p "$(print_status "INPUT" "⚠️  Are you sure you want to continue? (y/N): ")" confirm_shrink
-                    if [[ ! "$confirm_shrink" =~ ^[Yy]$ ]]; then
-                        print_status "INFO" "👍 Disk resize cancelled."
-                        return 0
-                    fi
-                fi
-                
                 # Resize the disk
                 print_status "INFO" "📈 Resizing disk to $new_disk_size..."
                 if qemu-img resize "$IMG_FILE" "$new_disk_size"; then
@@ -952,7 +882,7 @@ resize_vm_disk() {
     fi
 }
 
-# Function to show VM performance metrics
+# Function to show VM performance
 show_vm_performance() {
     local vm_name=$1
     
@@ -962,21 +892,19 @@ show_vm_performance() {
             echo "📈📈📈📈📈📈📈📈📈📈📈📈📈📈📈"
             
             # Get QEMU process ID
-            local qemu_pid=$(pgrep -f "qemu-system.*$IMG_FILE")
+            local qemu_pid=$(pgrep -f "qemu-system.*$IMG_FILE" | head -1)
             if [[ -n "$qemu_pid" ]]; then
                 # Show process stats
                 echo "⚡ QEMU Process Stats:"
-                ps -p "$qemu_pid" -o pid,%cpu,%mem,sz,rss,vsz,cmd --no-headers
-                echo
-                
-                # Show memory usage
-                echo "🧠 Memory Usage:"
-                free -h
+                ps -p "$qemu_pid" -o pid,%cpu,%mem,sz,rss,vsz,cmd --no-headers 2>/dev/null || echo "Process stats unavailable"
                 echo
                 
                 # Show disk usage
                 echo "💾 Disk Usage:"
-                df -h "$IMG_FILE" 2>/dev/null || du -h "$IMG_FILE"
+                if command -v du &> /dev/null; then
+                    du -h "$IMG_FILE" 2>/dev/null || echo "Disk info unavailable"
+                fi
+                echo
             else
                 print_status "ERROR" "❌ Could not find QEMU process for VM $vm_name"
             fi
@@ -1012,7 +940,6 @@ fix_vm_issues() {
             1)
                 print_status "INFO" "🔓 Removing lock files..."
                 rm -f "${IMG_FILE}.lock" 2>/dev/null
-                rm -f "${IMG_FILE}"*.lock 2>/dev/null
                 rm -f "/tmp/qemu-${vm_name}-monitor.sock" 2>/dev/null
                 print_status "SUCCESS" "✅ Lock files removed"
                 ;;
@@ -1031,14 +958,16 @@ fix_vm_issues() {
                 ;;
             4)
                 print_status "INFO" "💀 Killing stuck processes..."
-                pkill -f "qemu-system.*$IMG_FILE" 2>/dev/null
+                pkill -f "qemu-system.*$IMG_FILE" 2>/dev/null || true
                 sleep 1
                 if pgrep -f "qemu-system.*$IMG_FILE" >/dev/null; then
-                    pkill -9 -f "qemu-system.*$IMG_FILE" 2>/dev/null
+                    pkill -9 -f "qemu-system.*$IMG_FILE" 2>/dev/null || true
                     print_status "SUCCESS" "✅ Forcefully killed stuck processes"
                 else
                     print_status "INFO" "💤 No stuck processes found"
                 fi
+                rm -f "${IMG_FILE}.lock" 2>/dev/null
+                rm -f "/tmp/qemu-${vm_name}-monitor.sock" 2>/dev/null
                 ;;
             0)
                 return 0
@@ -1059,7 +988,7 @@ show_running_vms_menu() {
         echo
         print_status "INFO" "🚀 Currently running VMs ($running_count):"
         for i in "${!running_vms[@]}"; do
-            printf "  %2d) %s (SSH port: %s)\n" $((i+1)) "${running_vms[$i]}" "$(get_ssh_port "${running_vms[$i]}")"
+            printf "  %2d) %s\n" $((i+1)) "${running_vms[$i]}"
         done
         echo
     fi
@@ -1102,13 +1031,8 @@ main_menu() {
         if [ $vm_count -gt 0 ]; then
             echo "  2) 🚀 Start a VM"
             echo "  3) 🛑 Stop a VM"
-            if [ $running_count -gt 0 ]; then
-                echo "  4) 🔌 Connect to running VM (SSH)"
-                echo "  5) 🖥️  Connect to VM (GUI/Console)"
-            else
-                echo "  4) 🔌 Connect to VM (SSH)"
-                echo "  5) 🖥️  Connect to VM (GUI/Console)"
-            fi
+            echo "  4) 🔌 Connect to VM (SSH)"
+            echo "  5) 🖥️  Connect to VM (GUI/Console)"
             echo "  6) 📊 Show VM info"
             echo "  7) ✏️  Edit VM configuration"
             echo "  8) 🗑️  Delete a VM"
@@ -1140,8 +1064,8 @@ main_menu() {
                     if [ $running_count -gt 0 ]; then
                         show_running_vms_menu
                         read -p "$(print_status "INPUT" "🛑 Enter VM number to stop: ")" vm_num
-                        if [[ "$vm_num" =~ ^[0-9]+$ ]] && [ "$vm_num" -ge 1 ] && [ "$vm_num" -le $vm_count ]; then
-                            stop_vm "${vms[$((vm_num-1))]}"
+                        if [[ "$vm_num" =~ ^[0-9]+$ ]] && [ "$vm_num" -ge 1 ] && [ "$vm_num" -le $running_count ]; then
+                            stop_vm "${running_vms[$((vm_num-1))]}"
                         else
                             print_status "ERROR" "❌ Invalid selection"
                         fi
@@ -1154,40 +1078,25 @@ main_menu() {
             4)
                 if [ $vm_count -gt 0 ]; then
                     if [ $running_count -gt 0 ]; then
-                        echo
-                        print_status "INFO" "🚀 Select a running VM to connect to:"
-                        for i in "${!running_vms[@]}"; do
-                            printf "  %2d) %s (SSH port: %s)\n" $((i+1)) "${running_vms[$i]}" "$(get_ssh_port "${running_vms[$i]}")"
-                        done
-                        echo
+                        show_running_vms_menu
                         read -p "$(print_status "INPUT" "🔌 Enter VM number to connect (SSH): ")" vm_num
-                        if [[ "$vm_num" =~ ^[0-9]+$ ]] && [ "$vm_num" -ge 1 ] && [ "$vm_num" -le ${#running_vms[@]} ]; then
+                        if [[ "$vm_num" =~ ^[0-9]+$ ]] && [ "$vm_num" -ge 1 ] && [ "$vm_num" -le $running_count ]; then
                             connect_to_vm "${running_vms[$((vm_num-1))]}"
                         else
                             print_status "ERROR" "❌ Invalid selection"
                         fi
                     else
-                        # No running VMs, offer to connect to any VM (will start if not running)
-                        read -p "$(print_status "INPUT" "🔌 Enter VM number to connect (SSH): ")" vm_num
-                        if [[ "$vm_num" =~ ^[0-9]+$ ]] && [ "$vm_num" -ge 1 ] && [ "$vm_num" -le $vm_count ]; then
-                            connect_to_vm "${vms[$((vm_num-1))]}"
-                        else
-                            print_status "ERROR" "❌ Invalid selection"
-                        fi
+                        print_status "INFO" "💤 No running VMs. Please start a VM first."
+                        sleep 2
                     fi
                 fi
                 ;;
             5)
                 if [ $vm_count -gt 0 ]; then
                     if [ $running_count -gt 0 ]; then
-                        echo
-                        print_status "INFO" "🚀 Select a running VM to connect to:"
-                        for i in "${!running_vms[@]}"; do
-                            printf "  %2d) %s\n" $((i+1)) "${running_vms[$i]}"
-                        done
-                        echo
+                        show_running_vms_menu
                         read -p "$(print_status "INPUT" "🖥️  Enter VM number to connect (GUI/Console): ")" vm_num
-                        if [[ "$vm_num" =~ ^[0-9]+$ ]] && [ "$vm_num" -ge 1 ] && [ "$vm_num" -le ${#running_vms[@]} ]; then
+                        if [[ "$vm_num" =~ ^[0-9]+$ ]] && [ "$vm_num" -ge 1 ] && [ "$vm_num" -le $running_count ]; then
                             connect_to_vm_gui "${running_vms[$((vm_num-1))]}"
                         else
                             print_status "ERROR" "❌ Invalid selection"
@@ -1267,7 +1176,9 @@ main_menu() {
                 ;;
         esac
         
-        read -p "$(print_status "INPUT" "⏎ Press Enter to continue...")"
+        if [ $? -eq 0 ]; then
+            read -p "$(print_status "INPUT" "⏎ Press Enter to continue...")"
+        fi
     done
 }
 
@@ -1280,6 +1191,12 @@ check_dependencies
 # Initialize paths
 VM_DIR="${VM_DIR:-$HOME/vms}"
 mkdir -p "$VM_DIR"
+
+# Check for mkpasswd or openssl for password hashing
+if ! command -v mkpasswd &> /dev/null && ! command -v openssl &> /dev/null; then
+    print_status "WARN" "⚠️ Neither mkpasswd nor openssl found. Installing whois package for mkpasswd..."
+    sudo apt install whois -y || true
+fi
 
 # Supported OS list - UPDATED WITH DEBIAN 13
 declare -A OS_OPTIONS=(
