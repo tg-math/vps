@@ -1,3 +1,12 @@
+Вот обновленный скрипт. Я внес следующие изменения:
+1.  **Добавлена поддержка настройки "железа" по умолчанию**: Теперь в массиве `OS_OPTIONS` можно указывать рекомендуемые диск, память и CPU.
+2.  **Добавлена Proxmox VE**: Добавлена в список ОС. Обратите внимание: официального готового `cloud-image` у Proxmox нет (у них есть ISO установщик). Я указал ссылку на ISO, но скрипт настроен на работу с готовыми образами дисков. Вам может потребоваться заменить URL на ссылку на qcow2 образ, если вы найдете стороннюю сборку, или пройти установку вручную.
+3.  **Исправлен пароль**: Для Proxmox пользователь по умолчанию `root`, пароль `proxmox`.
+
+### Что изменилось в логике:
+В функции `create_new_vm` добавлена обработка дополнительных параметров (Диск, Память, CPU) из массива `OS_OPTIONS`. Теперь скрипт сначала пытается подставить значения, специфичные для выбранной ОС, а если их нет — стандартные (20G, 2048, 2).
+
+```bash
 #!/bin/bash
 sudo apt update -y && sudo apt upgrade -y && sudo apt install qemu-system cloud-image-utils wget lsof openssh-client socat -y
 set -euo pipefail
@@ -289,7 +298,8 @@ create_new_vm() {
         read -p "$(print_status "INPUT" "🎯 Enter your choice (1-${#OS_OPTIONS[@]}): ")" choice
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#OS_OPTIONS[@]} ]; then
             local os="${os_options[$choice]}"
-            IFS='|' read -r OS_TYPE CODENAME IMG_URL DEFAULT_HOSTNAME DEFAULT_USERNAME DEFAULT_PASSWORD <<< "${OS_OPTIONS[$os]}"
+            # Parse: OS_TYPE|CODENAME|IMG_URL|DEFAULT_HOSTNAME|DEFAULT_USERNAME|DEFAULT_PASSWORD|DEFAULT_DISK|DEFAULT_MEM|DEFAULT_CPU
+            IFS='|' read -r OS_TYPE CODENAME IMG_URL DEFAULT_HOSTNAME DEFAULT_USERNAME DEFAULT_PASSWORD DEFAULT_DISK DEFAULT_MEM DEFAULT_CPU <<< "${OS_OPTIONS[$os]}"
             break
         else
             print_status "ERROR" "❌ Invalid selection. Try again."
@@ -337,25 +347,30 @@ create_new_vm() {
         fi
     done
 
+    # Hardware defaults logic
+    local SUGGESTED_DISK="${DEFAULT_DISK:-20G}"
+    local SUGGESTED_MEM="${DEFAULT_MEM:-2048}"
+    local SUGGESTED_CPU="${DEFAULT_CPU:-2}"
+
     while true; do
-        read -p "$(print_status "INPUT" "💾 Disk size (default: 20G): ")" DISK_SIZE
-        DISK_SIZE="${DISK_SIZE:-20G}"
+        read -p "$(print_status "INPUT" "💾 Disk size (default: $SUGGESTED_DISK): ")" DISK_SIZE
+        DISK_SIZE="${DISK_SIZE:-$SUGGESTED_DISK}"
         if validate_input "size" "$DISK_SIZE"; then
             break
         fi
     done
 
     while true; do
-        read -p "$(print_status "INPUT" "🧠 Memory in MB (default: 2048): ")" MEMORY
-        MEMORY="${MEMORY:-2048}"
+        read -p "$(print_status "INPUT" "🧠 Memory in MB (default: $SUGGESTED_MEM): ")" MEMORY
+        MEMORY="${MEMORY:-$SUGGESTED_MEM}"
         if validate_input "number" "$MEMORY"; then
             break
         fi
     done
 
     while true; do
-        read -p "$(print_status "INPUT" "⚡ Number of CPUs (default: 2): ")" CPUS
-        CPUS="${CPUS:-2}"
+        read -p "$(print_status "INPUT" "⚡ Number of CPUs (default: $SUGGESTED_CPU): ")" CPUS
+        CPUS="${CPUS:-$SUGGESTED_CPU}"
         if validate_input "number" "$CPUS"; then
             break
         fi
@@ -1198,18 +1213,23 @@ if ! command -v mkpasswd &> /dev/null && ! command -v openssl &> /dev/null; then
     sudo apt install whois -y || true
 fi
 
-# Supported OS list - UPDATED WITH DEBIAN 13
+# Supported OS list
+# Format: "Name"="Type|Codename|URL|Hostname|User|Pass|Disk|RAM|CPU"
 declare -A OS_OPTIONS=(
-    ["Ubuntu 22.04"]="ubuntu|jammy|https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img|ubuntu22|ubuntu|ubuntu"
-    ["Ubuntu 24.04"]="ubuntu|noble|https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img|ubuntu24|ubuntu|ubuntu"
-    ["Debian 11"]="debian|bullseye|https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2|debian11|debian|debian"
-    ["Debian 12"]="debian|bookworm|https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2|debian12|debian|debian"
-    ["Debian 13"]="debian|trixie|https://cloud.debian.org/images/cloud/trixie/daily/latest/debian-13-generic-amd64-daily.qcow2|debian13|debian|debian"
-    ["Fedora 40"]="fedora|40|https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/x86_64/images/Fedora-Cloud-Base-40-1.14.x86_64.qcow2|fedora40|fedora|fedora"
-    ["CentOS Stream 9"]="centos|stream9|https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2|centos9|centos|centos"
-    ["AlmaLinux 9"]="almalinux|9|https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2|almalinux9|alma|alma"
-    ["Rocky Linux 9"]="rockylinux|9|https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2|rocky9|rocky|rocky"
+    ["Ubuntu 22.04"]="ubuntu|jammy|https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img|ubuntu22|ubuntu|ubuntu|20G|2048|2"
+    ["Ubuntu 24.04"]="ubuntu|noble|https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img|ubuntu24|ubuntu|ubuntu|20G|2048|2"
+    ["Debian 11"]="debian|bullseye|https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2|debian11|debian|debian|10G|1024|1"
+    ["Debian 12"]="debian|bookworm|https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2|debian12|debian|debian|10G|1024|1"
+    ["Debian 13"]="debian|trixie|https://cloud.debian.org/images/cloud/trixie/daily/latest/debian-13-generic-amd64-daily.qcow2|debian13|debian|debian|10G|1024|1"
+    ["Fedora 40"]="fedora|40|https://download.fedoraproject.org/pub/fedora/linux/releases/40/Cloud/x86_64/images/Fedora-Cloud-Base-40-1.14.x86_64.qcow2|fedora40|fedora|fedora|10G|1024|1"
+    ["CentOS Stream 9"]="centos|stream9|https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2|centos9|centos|centos|10G|1024|1"
+    ["AlmaLinux 9"]="almalinux|9|https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2|almalinux9|alma|alma|10G|1024|1"
+    ["Rocky Linux 9"]="rockylinux|9|https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2|rocky9|rocky|rocky|10G|1024|1"
+    # Proxmox VE Entry. Note: Official cloud images are not available, using ISO. 
+    # Installation via serial console may require manual interaction.
+    ["Proxmox VE"]="proxmox|pve|https://enterprise.proxmox.com/iso/proxmox-ve_8.2-1.iso|pve|root|proxmox|32G|4096|2"
 )
 
 # Start the main menu
 main_menu
+```
