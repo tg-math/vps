@@ -1215,7 +1215,7 @@ declare -A OS_OPTIONS=(
     ["AlmaLinux 9"]="almalinux|9|https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2|almalinux9|alma|alma|10G|1024|1"
     ["Rocky Linux 9"]="rockylinux|9|https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2|rocky9|rocky|rocky|10G|1024|1"
     # Proxmox VE Entry - Note: This is an ISO, not a cloud image. Installation requires manual interaction.
-    ["Proxmox VE"]="proxmox|pve|https://enterprise.proxmox.com/iso/proxmox-ve_8.2-1.iso|pve|root|proxmox|32G|4096|2"
+    ["Proxmox VE"]="proxmox|pve|https://enterprise.proxmox.com/iso/proxmox-ve_8.4-1.iso|pve|root|proxmox|512G|512000|32"
 )
 
 # Start the main menu
