@@ -7,7 +7,7 @@
 # Function to display header
 display_header() {
     clear
-    cat << "EOF"
+    cat << "EOF2"
 ████████╗██╗███╗   ███╗ █████╗ 
 ╚══██╔══╝██║████╗ ████║██╔══██╗
    ██║   ██║██╔████╔██║███████║
@@ -16,7 +16,7 @@ display_header() {
    ╚═╝   ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝
                                
            Tima VM              
-EOF
+EOF2
     echo
 }
 
