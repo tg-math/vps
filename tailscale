@@ -513,227 +513,259 @@ main() {
 		exit 1
 	fi
 
-
-	# Step 4: run the installation.
-	OSVERSION="$OS"
-	[ "$VERSION" != "" ] && OSVERSION="$OSVERSION $VERSION"
-
-	# Prepare package name with optional version
-	PACKAGE_NAME="tailscale"
-	if [ -n "$TAILSCALE_VERSION" ]; then
-		echo "Installing Tailscale $TAILSCALE_VERSION for $OSVERSION, using method $PACKAGETYPE"
+	# Check if Tailscale is already installed and connected
+	TAILSCALE_INSTALLED=0
+	TAILSCALE_CONNECTED=0
+	
+	if command -v tailscale >/dev/null 2>&1; then
+		TAILSCALE_INSTALLED=1
+		echo "✓ Tailscale is already installed"
+		
+		# Check if tailscale is connected/up
+		if tailscale status >/dev/null 2>&1; then
+			TAILSCALE_CONNECTED=1
+			echo "✓ Tailscale is already connected/running"
+		else
+			echo "⚠ Tailscale is installed but not connected/running"
+		fi
 	else
-		echo "Installing Tailscale for $OSVERSION, using method $PACKAGETYPE"
+		echo "Tailscale is not installed. Proceeding with installation..."
 	fi
-	case "$PACKAGETYPE" in
-		apt)
-			export DEBIAN_FRONTEND=noninteractive
-			if [ "$APT_KEY_TYPE" = "legacy" ] && ! type gpg >/dev/null; then
-				$SUDO apt-get update
-				$SUDO apt-get install -y gnupg
-			fi
 
-			set -x
-			$SUDO mkdir -p --mode=0755 /usr/share/keyrings
-			case "$APT_KEY_TYPE" in
-				legacy)
-					$CURL "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION.asc" | $SUDO apt-key add -
-					$CURL "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION.list" | $SUDO tee /etc/apt/sources.list.d/tailscale.list
-					$SUDO chmod 0644 /etc/apt/sources.list.d/tailscale.list
-				;;
-				keyring)
-					$CURL "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION.noarmor.gpg" | $SUDO tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
-					$SUDO chmod 0644 /usr/share/keyrings/tailscale-archive-keyring.gpg
-					$CURL "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION.tailscale-keyring.list" | $SUDO tee /etc/apt/sources.list.d/tailscale.list
-					$SUDO chmod 0644 /etc/apt/sources.list.d/tailscale.list
-				;;
-			esac
-			$SUDO apt-get update
-			if [ -n "$TAILSCALE_VERSION" ]; then
-				$SUDO apt-get install -y "tailscale=$TAILSCALE_VERSION" tailscale-archive-keyring
-			else
-				$SUDO apt-get install -y tailscale tailscale-archive-keyring
-			fi
-			if [ "$APT_SYSTEMCTL_START" = "true" ]; then
-				$SUDO systemctl enable --now tailscaled
-				$SUDO systemctl start tailscaled
-			fi
-			set +x
-		;;
-		yum)
-			set -x
-			$SUDO yum install yum-utils -y
-			$SUDO yum-config-manager -y --add-repo "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION/tailscale.repo"
-			if [ -n "$TAILSCALE_VERSION" ]; then
-				$SUDO yum install "tailscale-$TAILSCALE_VERSION" -y
-			else
-				$SUDO yum install tailscale -y
-			fi
-			$SUDO systemctl enable --now tailscaled
-			set +x
-		;;
-		dnf)
-			# DNF 5 has a different argument format; determine which one we have.
-			DNF_VERSION="3"
-			if LANG=C.UTF-8 dnf --version | grep -q '^dnf5 version'; then
-				DNF_VERSION="5"
-			fi
+	# Step 4: run the installation if needed.
+	if [ "$TAILSCALE_INSTALLED" -eq 0 ]; then
+		OSVERSION="$OS"
+		[ "$VERSION" != "" ] && OSVERSION="$OSVERSION $VERSION"
 
-			# The 'config-manager' plugin wasn't implemented when
-			# DNF5 was released; detect that and use the old
-			# version if necessary.
-			if [ "$DNF_VERSION" = "5" ]; then
+		if [ -n "$TAILSCALE_VERSION" ]; then
+			echo "Installing Tailscale $TAILSCALE_VERSION for $OSVERSION, using method $PACKAGETYPE"
+		else
+			echo "Installing Tailscale for $OSVERSION, using method $PACKAGETYPE"
+		fi
+		
+		case "$PACKAGETYPE" in
+			apt)
+				export DEBIAN_FRONTEND=noninteractive
+				if [ "$APT_KEY_TYPE" = "legacy" ] && ! type gpg >/dev/null; then
+					$SUDO apt-get update
+					$SUDO apt-get install -y gnupg
+				fi
+
 				set -x
-				$SUDO dnf install -y 'dnf-command(config-manager)' && DNF_HAVE_CONFIG_MANAGER=1 || DNF_HAVE_CONFIG_MANAGER=0
+				$SUDO mkdir -p --mode=0755 /usr/share/keyrings
+				case "$APT_KEY_TYPE" in
+					legacy)
+						$CURL "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION.asc" | $SUDO apt-key add -
+						$CURL "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION.list" | $SUDO tee /etc/apt/sources.list.d/tailscale.list
+						$SUDO chmod 0644 /etc/apt/sources.list.d/tailscale.list
+					;;
+					keyring)
+						$CURL "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION.noarmor.gpg" | $SUDO tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+						$SUDO chmod 0644 /usr/share/keyrings/tailscale-archive-keyring.gpg
+						$CURL "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION.tailscale-keyring.list" | $SUDO tee /etc/apt/sources.list.d/tailscale.list
+						$SUDO chmod 0644 /etc/apt/sources.list.d/tailscale.list
+					;;
+				esac
+				$SUDO apt-get update
+				if [ -n "$TAILSCALE_VERSION" ]; then
+					$SUDO apt-get install -y "tailscale=$TAILSCALE_VERSION" tailscale-archive-keyring
+				else
+					$SUDO apt-get install -y tailscale tailscale-archive-keyring
+				fi
+				if [ "$APT_SYSTEMCTL_START" = "true" ]; then
+					$SUDO systemctl enable --now tailscaled
+					$SUDO systemctl start tailscaled
+				fi
 				set +x
+			;;
+			yum)
+				set -x
+				$SUDO yum install yum-utils -y
+				$SUDO yum-config-manager -y --add-repo "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION/tailscale.repo"
+				if [ -n "$TAILSCALE_VERSION" ]; then
+					$SUDO yum install "tailscale-$TAILSCALE_VERSION" -y
+				else
+					$SUDO yum install tailscale -y
+				fi
+				$SUDO systemctl enable --now tailscaled
+				set +x
+			;;
+			dnf)
+				# DNF 5 has a different argument format; determine which one we have.
+				DNF_VERSION="3"
+				if LANG=C.UTF-8 dnf --version | grep -q '^dnf5 version'; then
+					DNF_VERSION="5"
+				fi
 
-				if [ "$DNF_HAVE_CONFIG_MANAGER" != "1" ]; then
-					if type dnf-3 >/dev/null; then
-						DNF_VERSION="3"
+				# The 'config-manager' plugin wasn't implemented when
+				# DNF5 was released; detect that and use the old
+				# version if necessary.
+				if [ "$DNF_VERSION" = "5" ]; then
+					set -x
+					$SUDO dnf install -y 'dnf-command(config-manager)' && DNF_HAVE_CONFIG_MANAGER=1 || DNF_HAVE_CONFIG_MANAGER=0
+					set +x
+
+					if [ "$DNF_HAVE_CONFIG_MANAGER" != "1" ]; then
+						if type dnf-3 >/dev/null; then
+							DNF_VERSION="3"
+						else
+							echo "dnf 5 detected, but 'dnf-command(config-manager)' not available and dnf-3 not found"
+							exit 1
+						fi
+					fi
+				fi
+
+				set -x
+				if [ "$DNF_VERSION" = "3" ]; then
+					$SUDO dnf install -y 'dnf-command(config-manager)'
+					$SUDO dnf config-manager --add-repo "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION/tailscale.repo"
+				elif [ "$DNF_VERSION" = "5" ]; then
+					# Already installed config-manager, above.
+					$SUDO dnf config-manager addrepo --overwrite --from-repofile="https://pkgs.tailscale.com/$TRACK/$OS/$VERSION/tailscale.repo"
+				else
+					echo "unexpected: unknown dnf version $DNF_VERSION"
+					exit 1
+				fi
+				if [ -n "$TAILSCALE_VERSION" ]; then
+					$SUDO dnf install -y "tailscale-$TAILSCALE_VERSION"
+				else
+					$SUDO dnf install -y tailscale
+				fi
+				$SUDO systemctl enable --now tailscaled
+				set +x
+			;;
+			tdnf)
+				set -x
+				curl -fsSL "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION/tailscale.repo" > /etc/yum.repos.d/tailscale.repo
+				if [ -n "$TAILSCALE_VERSION" ]; then
+					$SUDO tdnf install -y "tailscale-$TAILSCALE_VERSION"
+				else
+					$SUDO tdnf install -y tailscale
+				fi
+				$SUDO systemctl enable --now tailscaled
+				set +x
+			;;
+			zypper)
+				set -x
+				$SUDO rpm --import "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION/repo.gpg"
+				$SUDO zypper --non-interactive ar -g -r "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION/tailscale.repo"
+				$SUDO zypper --non-interactive --gpg-auto-import-keys refresh
+				if [ -n "$TAILSCALE_VERSION" ]; then
+					$SUDO zypper --non-interactive install "tailscale=$TAILSCALE_VERSION"
+				else
+					$SUDO zypper --non-interactive install tailscale
+				fi
+				$SUDO systemctl enable --now tailscaled
+				set +x
+				;;
+			pacman)
+				set -x
+				if [ -n "$TAILSCALE_VERSION" ]; then
+					echo "Warning: Arch Linux maintains their own Tailscale package. Version pinning may not work as expected, as the target version may no longer be available."
+					$SUDO pacman -S "tailscale=$TAILSCALE_VERSION" --noconfirm
+				else
+					$SUDO pacman -S tailscale --noconfirm
+				fi
+				$SUDO systemctl enable --now tailscaled
+				set +x
+				;;
+			pkg)
+				set -x
+				if [ -n "$TAILSCALE_VERSION" ]; then
+					echo "Warning: FreeBSD maintains their own Tailscale package. Version pinning may not work as expected, as the target version may no longer be available."
+					$SUDO pkg install --yes "tailscale-$TAILSCALE_VERSION"
+				else
+					$SUDO pkg install --yes tailscale
+				fi
+				$SUDO service tailscaled enable
+				$SUDO service tailscaled start
+				set +x
+				;;
+			apk)
+				set -x
+				if ! grep -Eq '^http.*/community$' /etc/apk/repositories; then
+					if type setup-apkrepos >/dev/null; then
+						$SUDO setup-apkrepos -c -1
 					else
-						echo "dnf 5 detected, but 'dnf-command(config-manager)' not available and dnf-3 not found"
+						echo "installing tailscale requires the community repo to be enabled in /etc/apk/repositories"
 						exit 1
 					fi
 				fi
-			fi
-
-			set -x
-			if [ "$DNF_VERSION" = "3" ]; then
-				$SUDO dnf install -y 'dnf-command(config-manager)'
-				$SUDO dnf config-manager --add-repo "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION/tailscale.repo"
-			elif [ "$DNF_VERSION" = "5" ]; then
-				# Already installed config-manager, above.
-				$SUDO dnf config-manager addrepo --overwrite --from-repofile="https://pkgs.tailscale.com/$TRACK/$OS/$VERSION/tailscale.repo"
-			else
-				echo "unexpected: unknown dnf version $DNF_VERSION"
-				exit 1
-			fi
-			if [ -n "$TAILSCALE_VERSION" ]; then
-				$SUDO dnf install -y "tailscale-$TAILSCALE_VERSION"
-			else
-				$SUDO dnf install -y tailscale
-			fi
-			$SUDO systemctl enable --now tailscaled
-			set +x
-		;;
-		tdnf)
-			set -x
-			curl -fsSL "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION/tailscale.repo" > /etc/yum.repos.d/tailscale.repo
-			if [ -n "$TAILSCALE_VERSION" ]; then
-				$SUDO tdnf install -y "tailscale-$TAILSCALE_VERSION"
-			else
-				$SUDO tdnf install -y tailscale
-			fi
-			$SUDO systemctl enable --now tailscaled
-			set +x
-		;;
-		zypper)
-			set -x
-			$SUDO rpm --import "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION/repo.gpg"
-			$SUDO zypper --non-interactive ar -g -r "https://pkgs.tailscale.com/$TRACK/$OS/$VERSION/tailscale.repo"
-			$SUDO zypper --non-interactive --gpg-auto-import-keys refresh
-			if [ -n "$TAILSCALE_VERSION" ]; then
-				$SUDO zypper --non-interactive install "tailscale=$TAILSCALE_VERSION"
-			else
-				$SUDO zypper --non-interactive install tailscale
-			fi
-			$SUDO systemctl enable --now tailscaled
-			set +x
-			;;
-		pacman)
-			set -x
-			if [ -n "$TAILSCALE_VERSION" ]; then
-				echo "Warning: Arch Linux maintains their own Tailscale package. Version pinning may not work as expected, as the target version may no longer be available."
-				$SUDO pacman -S "tailscale=$TAILSCALE_VERSION" --noconfirm
-			else
-				$SUDO pacman -S tailscale --noconfirm
-			fi
-			$SUDO systemctl enable --now tailscaled
-			set +x
-			;;
-		pkg)
-			set -x
-			if [ -n "$TAILSCALE_VERSION" ]; then
-				echo "Warning: FreeBSD maintains their own Tailscale package. Version pinning may not work as expected, as the target version may no longer be available."
-				$SUDO pkg install --yes "tailscale-$TAILSCALE_VERSION"
-			else
-				$SUDO pkg install --yes tailscale
-			fi
-			$SUDO service tailscaled enable
-			$SUDO service tailscaled start
-			set +x
-			;;
-		apk)
-			set -x
-			if ! grep -Eq '^http.*/community$' /etc/apk/repositories; then
-				if type setup-apkrepos >/dev/null; then
-					$SUDO setup-apkrepos -c -1
+				if [ -n "$TAILSCALE_VERSION" ]; then
+					echo "Warning: Alpine Linux maintains their own Tailscale package. Version pinning may not work as expected, as the target version may no longer be available."
+					$SUDO apk add "tailscale=$TAILSCALE_VERSION"
 				else
-					echo "installing tailscale requires the community repo to be enabled in /etc/apk/repositories"
-					exit 1
+					$SUDO apk add tailscale
 				fi
-			fi
-			if [ -n "$TAILSCALE_VERSION" ]; then
-				echo "Warning: Alpine Linux maintains their own Tailscale package. Version pinning may not work as expected, as the target version may no longer be available."
-				$SUDO apk add "tailscale=$TAILSCALE_VERSION"
-			else
-				$SUDO apk add tailscale
-			fi
-			$SUDO rc-update add tailscale
-			$SUDO rc-service tailscale start
-			set +x
-			;;
-		xbps)
-			set -x
-			if [ -n "$TAILSCALE_VERSION" ]; then
-				echo "Warning: Void Linux maintains their own Tailscale package. Version pinning may not work as expected, as the target version may no longer be available."
-				$SUDO xbps-install "tailscale-$TAILSCALE_VERSION" -y
-			else
-				$SUDO xbps-install tailscale -y
-			fi
-			set +x
-			;;
-		emerge)
-			set -x
-			if [ -n "$TAILSCALE_VERSION" ]; then
-				echo "Warning: Gentoo maintains their own Tailscale package. Version pinning may not work as expected, as the target version may no longer be available."
-				$SUDO emerge --ask=n "=net-vpn/tailscale-$TAILSCALE_VERSION"
-			else
-				$SUDO emerge --ask=n net-vpn/tailscale
-			fi
-			set +x
-			;;
-		appstore)
-			set -x
-			open "https://apps.apple.com/us/app/tailscale/id1475387142"
-			set +x
-			;;
-		*)
-			echo "unexpected: unknown package type $PACKAGETYPE"
-			exit 1
-			;;
-	esac
-
-	# Run tailscale up
-	echo
-	echo "Starting Tailscale..."
-	if [ -z "$SUDO" ]; then
-		tailscale up
-	else
-		$SUDO tailscale up
+				$SUDO rc-update add tailscale
+				$SUDO rc-service tailscale start
+				set +x
+				;;
+			xbps)
+				set -x
+				if [ -n "$TAILSCALE_VERSION" ]; then
+					echo "Warning: Void Linux maintains their own Tailscale package. Version pinning may not work as expected, as the target version may no longer be available."
+					$SUDO xbps-install "tailscale-$TAILSCALE_VERSION" -y
+				else
+					$SUDO xbps-install tailscale -y
+				fi
+				set +x
+				;;
+			emerge)
+				set -x
+				if [ -n "$TAILSCALE_VERSION" ]; then
+					echo "Warning: Gentoo maintains their own Tailscale package. Version pinning may not work as expected, as the target version may no longer be available."
+					$SUDO emerge --ask=n "=net-vpn/tailscale-$TAILSCALE_VERSION"
+				else
+					$SUDO emerge --ask=n net-vpn/tailscale
+				fi
+				set +x
+				;;
+			appstore)
+				set -x
+				open "https://apps.apple.com/us/app/tailscale/id1475387142"
+				set +x
+				;;
+			*)
+				echo "unexpected: unknown package type $PACKAGETYPE"
+				exit 1
+				;;
+		esac
+		
+		# Reset installed flag after installation
+		TAILSCALE_INSTALLED=1
 	fi
 
-	# Configure SSH for root login
+	# Run tailscale up only if not already connected
+	if [ "$TAILSCALE_INSTALLED" -eq 1 ] && [ "$TAILSCALE_CONNECTED" -eq 0 ]; then
+		echo
+		echo "Starting Tailscale..."
+		if [ -z "$SUDO" ]; then
+			tailscale up
+		else
+			$SUDO tailscale up
+		fi
+	elif [ "$TAILSCALE_INSTALLED" -eq 1 ] && [ "$TAILSCALE_CONNECTED" -eq 1 ]; then
+		echo
+		echo "✓ Tailscale is already connected. Skipping 'tailscale up'."
+	fi
+
+	# Configure SSH for root login (always run, regardless of Tailscale status)
 	echo
 	echo "Configuring SSH for root login..."
 	CONFIG_FILE="/etc/ssh/sshd_config"
 	
-	# Backup original config
-	cp "$CONFIG_FILE" "${CONFIG_FILE}.bak"
+	# Backup original config if not already backed up
+	if [ ! -f "${CONFIG_FILE}.bak" ]; then
+		cp "$CONFIG_FILE" "${CONFIG_FILE}.bak"
+		echo "✓ SSH config backed up to ${CONFIG_FILE}.bak"
+	fi
 	
 	# Enable PermitRootLogin yes
 	sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' "$CONFIG_FILE"
-	grep -q "^PermitRootLogin" "$CONFIG_FILE" || echo "PermitRootLogin yes" >> "$CONFIG_FILE"
+	if ! grep -q "^PermitRootLogin" "$CONFIG_FILE"; then
+		echo "PermitRootLogin yes" >> "$CONFIG_FILE"
+	fi
 	
 	# Handle PasswordAuthentication variations
 	sed -i '/^#PasswordAuthentication/d' "$CONFIG_FILE"
@@ -752,7 +784,8 @@ main() {
 	echo
 	echo "=============================="
 	echo "Installation complete!"
-	echo "Tailscale is now running and SSH has been configured for root login."
+	echo "✓ Tailscale is $( [ "$TAILSCALE_CONNECTED" -eq 1 ] && echo "connected" || echo "now running" )"
+	echo "✓ SSH has been configured for root login"
 	echo
 	echo "Ab aap manually root password set karen:"
 	echo "Run this command: sudo passwd root"
