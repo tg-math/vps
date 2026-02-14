@@ -210,7 +210,7 @@ create_cloud_init_config() {
         print_status "WARN" "⚠️ Password will be stored in plain text (install mkpasswd for better security)"
     fi
     
-    # Base cloud-init configuration
+    # Create user-data
     cat > user-data <<EOF
 #cloud-config
 hostname: $hostname
@@ -353,6 +353,59 @@ ethernets:
     dhcp4: true
     dhcp6: false
 EOF
+}
+
+# Function to create seed image
+create_seed_image() {
+    local seed_file=$1
+    
+    print_status "INFO" "💿 Creating cloud-init seed image..."
+    
+    # Try cloud-localds first (with correct syntax)
+    if command -v cloud-localds &> /dev/null; then
+        # cloud-localds only accepts user-data and optionally meta-data
+        if [ -f "network-config" ]; then
+            # Include network-config in the seed image using the -N option
+            cloud-localds -N network-config "$seed_file" user-data meta-data
+        else
+            cloud-localds "$seed_file" user-data meta-data
+        fi
+        
+        if [ $? -eq 0 ]; then
+            return 0
+        else
+            print_status "WARN" "⚠️ cloud-localds failed, falling back to genisoimage"
+        fi
+    fi
+    
+    # Fallback to genisoimage
+    if command -v genisoimage &> /dev/null; then
+        local iso_args=(
+            -output "$seed_file"
+            -volid "cidata"
+            -joliet
+            -rock
+            user-data
+            meta-data
+        )
+        
+        # Add network-config if it exists
+        if [ -f "network-config" ]; then
+            iso_args+=(network-config)
+        fi
+        
+        genisoimage "${iso_args[@]}"
+        
+        if [ $? -eq 0 ]; then
+            return 0
+        else
+            print_status "ERROR" "❌ Failed to create seed image with genisoimage"
+            return 1
+        fi
+    else
+        print_status "ERROR" "❌ No tool available to create seed image (need cloud-localds or genisoimage)"
+        return 1
+    fi
 }
 
 # Function to connect to a running VM via SSH
@@ -581,15 +634,7 @@ setup_vm_image() {
     create_cloud_init_config "$OS_TYPE" "$CODENAME" "$HOSTNAME" "$USERNAME" "$PASSWORD"
 
     # Create seed image
-    print_status "INFO" "💿 Creating cloud-init seed image..."
-    if command -v cloud-localds &> /dev/null; then
-        cloud-localds "$SEED_FILE" user-data meta-data network-config
-    else
-        # Fallback to genisoimage if cloud-localds is not available
-        genisoimage -output "$SEED_FILE" -volid cidata -joliet -rock user-data meta-data network-config
-    fi
-    
-    if [ $? -ne 0 ]; then
+    if ! create_seed_image "$SEED_FILE"; then
         print_status "ERROR" "❌ Failed to create cloud-init seed image"
         exit 1
     fi
@@ -651,11 +696,7 @@ start_vm() {
         if [[ ! -f "$SEED_FILE" ]]; then
             print_status "WARN" "⚠️  Seed file not found, recreating..."
             create_cloud_init_config "$OS_TYPE" "$CODENAME" "$HOSTNAME" "$USERNAME" "$PASSWORD"
-            if command -v cloud-localds &> /dev/null; then
-                cloud-localds "$SEED_FILE" user-data meta-data network-config
-            else
-                genisoimage -output "$SEED_FILE" -volid cidata -joliet -rock user-data meta-data network-config
-            fi
+            create_seed_image "$SEED_FILE"
             cleanup
         fi
         
