@@ -1023,7 +1023,7 @@ trap cleanup EXIT
 check_dependencies
 
 # Initialize paths
-VM_DIR="${VM_DIR:-$HOME/vms}"
+VM_DIR="${VM_DIR:-/data/vms}"
 mkdir -p "$VM_DIR"
 
 # Check for mkpasswd or openssl for password hashing
